@@ -14,18 +14,18 @@
 <link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
   :root{
-    --paper: #E7E4DA;
-    --card: #FBF9F3;
+    --paper: #F6F4EC;
+    --card: #FFFFFF;
     --ink: #20261D;
-    --ink-soft: #565F51;
-    --rule: #B6AF9E;
-    --rule-light: #D9D4C6;
+    --ink-soft: #6B7364;
+    --rule: #DCD6C6;
+    --rule-light: #EDE9DC;
     --overdue: #A73B2A;
     --soon: #B8862A;
     --ok: #3F6B4F;
-    --overdue-bg: #F3E2DD;
-    --soon-bg: #F3E7D2;
-    --ok-bg: #E0E8E0;
+    --overdue-bg: #F6E4DF;
+    --soon-bg: #F6EAD6;
+    --ok-bg: #E3ECE3;
   }
   *{box-sizing:border-box;}
   body{
@@ -181,6 +181,29 @@
     border:1px solid var(--rule);
     color:var(--ink-soft);
     border-radius:3px;
+  }
+  .filter-bar{
+    display:flex;
+    gap:8px;
+    flex-wrap:wrap;
+    margin-bottom:16px;
+  }
+  .filter-pill{
+    background:var(--card);
+    border:1px solid var(--rule);
+    color:var(--ink-soft);
+    font-family:'IBM Plex Mono', monospace;
+    font-size:11px;
+    text-transform:uppercase;
+    letter-spacing:0.05em;
+    padding:6px 12px;
+    border-radius:999px;
+  }
+  .filter-pill:hover{border-color:var(--ink);color:var(--ink);}
+  .filter-pill.active{
+    background:var(--ink);
+    color:var(--card);
+    border-color:var(--ink);
   }
   .entry-meta{
     font-family:'IBM Plex Mono', monospace;
@@ -349,6 +372,7 @@
   </div>
 
   <div id="loading" style="color:var(--ink-soft);font-size:13px;">Loading your ledger…</div>
+  <div class="filter-bar" id="filterBar" style="display:none;"></div>
   <div class="entries" id="entries" style="display:none;"></div>
   <div class="empty" id="emptyState" style="display:none;">
     <h3>Nothing on record yet</h3>
@@ -376,12 +400,7 @@
       </div>
       <div class="field">
         <label for="fCategory">Category</label>
-        <select id="fCategory">
-          <option value="loan">Loan</option>
-          <option value="subscription">Subscription</option>
-          <option value="utility">Utility</option>
-          <option value="other">Other</option>
-        </select>
+        <select id="fCategory"></select>
       </div>
     </div>
     <div class="row2">
@@ -399,6 +418,18 @@
         <input id="fDueDate" type="date">
       </div>
     </div>
+    <div class="field">
+      <label for="fRemind">Remind me</label>
+      <select id="fRemind">
+        <option value="0">On the due date</option>
+        <option value="1" selected>1 day before</option>
+        <option value="2">2 days before</option>
+        <option value="3">3 days before</option>
+        <option value="5">5 days before</option>
+        <option value="7">7 days before</option>
+        <option value="14">14 days before</option>
+      </select>
+    </div>
     <div class="modal-actions">
       <button class="btn-secondary" id="cancelModal">Cancel</button>
       <button class="btn-add" id="saveEntry">Save entry</button>
@@ -408,13 +439,20 @@
 
 <script>
 const STORAGE_KEY = 'payments';
+const CATEGORIES_KEY = 'categories';
+const DEFAULT_CATEGORIES = ['Loan', 'Subscription', 'Utility', 'Other'];
+const CATEGORY_PALETTE = ['#3F6B4F', '#B8862A', '#5B7CA3', '#A73B2A', '#7A5C99', '#4E7C7C', '#8C5A3C', '#6A6A3D'];
+
 let payments = [];
+let categories = [];
 let editingId = null;
+let activeFilter = 'all';
 
 const entriesEl = document.getElementById('entries');
 const emptyEl = document.getElementById('emptyState');
 const loadingEl = document.getElementById('loading');
 const overlay = document.getElementById('overlay');
+const filterBarEl = document.getElementById('filterBar');
 
 function todayDateOnly(){
   const d = new Date();
@@ -473,6 +511,15 @@ async function loadPayments(){
   }catch(e){
     payments = [];
   }
+  // Migration: fill in defaults for entries saved before reminders existed
+  payments.forEach(p => {
+    if(p.remindDaysBefore === undefined || p.remindDaysBefore === null){
+      p.remindDaysBefore = 1;
+    }
+    if(p.category){
+      p.category = p.category.charAt(0).toUpperCase() + p.category.slice(1);
+    }
+  });
 }
 
 async function savePayments(){
@@ -482,6 +529,93 @@ async function savePayments(){
     console.error('Could not save ledger', e);
   }
 }
+
+async function loadCategories(){
+  try{
+    const result = await window.storage.get(CATEGORIES_KEY, false);
+    categories = result && result.value ? JSON.parse(result.value) : [...DEFAULT_CATEGORIES];
+  }catch(e){
+    categories = [...DEFAULT_CATEGORIES];
+  }
+  // Make sure any category already used by a payment is in the list
+  payments.forEach(p => {
+    if(p.category && !categories.includes(p.category)){
+      categories.push(p.category);
+    }
+  });
+}
+
+async function saveCategories(){
+  try{
+    await window.storage.set(CATEGORIES_KEY, JSON.stringify(categories), false);
+  }catch(e){
+    console.error('Could not save categories', e);
+  }
+}
+
+function categoryColor(category){
+  const idx = categories.indexOf(category);
+  return CATEGORY_PALETTE[(idx < 0 ? 0 : idx) % CATEGORY_PALETTE.length];
+}
+
+function populateCategorySelect(selected){
+  const sel = document.getElementById('fCategory');
+  sel.innerHTML = '';
+  categories.forEach(c => {
+    const opt = document.createElement('option');
+    opt.value = c;
+    opt.textContent = c;
+    sel.appendChild(opt);
+  });
+  const newOpt = document.createElement('option');
+  newOpt.value = '__new__';
+  newOpt.textContent = '+ Add new category…';
+  sel.appendChild(newOpt);
+  sel.value = selected && categories.includes(selected) ? selected : categories[0];
+}
+
+document.getElementById('fCategory').addEventListener('change', (e) => {
+  if(e.target.value === '__new__'){
+    const name = prompt('New category name:');
+    const trimmed = name ? name.trim() : '';
+    if(trimmed){
+      if(!categories.includes(trimmed)) categories.push(trimmed);
+      populateCategorySelect(trimmed);
+      saveCategories();
+    } else {
+      populateCategorySelect(categories[0]);
+    }
+  }
+});
+
+function renderFilterBar(){
+  if(categories.length === 0 || payments.length === 0){
+    filterBarEl.style.display = 'none';
+    return;
+  }
+  filterBarEl.style.display = 'flex';
+  const usedCategories = categories.filter(c => payments.some(p => p.category === c));
+  filterBarEl.innerHTML = '';
+  const allPill = document.createElement('button');
+  allPill.className = 'filter-pill' + (activeFilter === 'all' ? ' active' : '');
+  allPill.textContent = 'All';
+  allPill.dataset.filter = 'all';
+  filterBarEl.appendChild(allPill);
+  usedCategories.forEach(c => {
+    const pill = document.createElement('button');
+    pill.className = 'filter-pill' + (activeFilter === c ? ' active' : '');
+    pill.textContent = c;
+    pill.dataset.filter = c;
+    filterBarEl.appendChild(pill);
+  });
+}
+
+filterBarEl.addEventListener('click', (e) => {
+  const btn = e.target.closest('button[data-filter]');
+  if(!btn) return;
+  activeFilter = btn.dataset.filter;
+  render();
+});
 
 function render(){
   loadingEl.style.display = 'none';
@@ -494,8 +628,12 @@ function render(){
     emptyEl.style.display = 'none';
   }
 
+  renderFilterBar();
+
+  const filtered = activeFilter === 'all' ? payments : payments.filter(p => p.category === activeFilter);
+
   // Sort by days until due, ascending
-  const sorted = [...payments].sort((a,b) => {
+  const sorted = [...filtered].sort((a,b) => {
     return daysUntil(parseDateOnly(a.dueDate)) - daysUntil(parseDateOnly(b.dueDate));
   });
 
@@ -528,13 +666,14 @@ function render(){
       stampLabel = diff + 'D';
     }
 
+    const tagColor = categoryColor(p.category);
     const row = document.createElement('div');
     row.className = 'entry';
     row.innerHTML = `
       <div class="stamp ${stampClass}"><span>${stampLabel}</span></div>
       <div class="entry-main">
-        <div class="entry-name">${escapeHtml(p.name)} <span class="tag">${p.category}</span></div>
-        <div class="entry-meta">Due ${formatDisplayDate(due)} · ${p.frequency === 'once' ? 'one-off' : p.frequency}</div>
+        <div class="entry-name">${escapeHtml(p.name)} <span class="tag" style="border-color:${tagColor};color:${tagColor};">${escapeHtml(p.category)}</span></div>
+        <div class="entry-meta">Due ${formatDisplayDate(due)} · ${p.frequency === 'once' ? 'one-off' : p.frequency} · reminder ${p.remindDaysBefore == 0 ? 'on due date' : p.remindDaysBefore + 'd before'}</div>
       </div>
       <div class="entry-amount">${currency(p.amount)}</div>
       <div class="entry-actions">
@@ -549,7 +688,7 @@ function render(){
   document.getElementById('sumMonthly').textContent = currency(monthlyTotal);
   document.getElementById('sumSoon').textContent = currency(soonTotal);
   document.getElementById('sumOverdue').textContent = overdueCount;
-  document.getElementById('entriesTitle').textContent = `Entries (${payments.length})`;
+  document.getElementById('entriesTitle').textContent = `Entries (${filtered.length})`;
 }
 
 function escapeHtml(str){
@@ -563,9 +702,10 @@ function openModal(entry){
   document.getElementById('modalTitle').textContent = entry ? 'Edit payment' : 'Add a payment';
   document.getElementById('fName').value = entry ? entry.name : '';
   document.getElementById('fAmount').value = entry ? entry.amount : '';
-  document.getElementById('fCategory').value = entry ? entry.category : 'loan';
+  populateCategorySelect(entry ? entry.category : categories[0]);
   document.getElementById('fFrequency').value = entry ? entry.frequency : 'monthly';
   document.getElementById('fDueDate').value = entry ? entry.dueDate : formatDateOnly(todayDateOnly());
+  document.getElementById('fRemind').value = entry ? String(entry.remindDaysBefore) : '1';
   overlay.classList.add('open');
   document.getElementById('fName').focus();
 }
@@ -583,9 +723,15 @@ overlay.addEventListener('click', (e) => { if(e.target === overlay) closeModal()
 document.getElementById('saveEntry').addEventListener('click', async () => {
   const name = document.getElementById('fName').value.trim();
   const amount = parseFloat(document.getElementById('fAmount').value);
-  const category = document.getElementById('fCategory').value;
+  let category = document.getElementById('fCategory').value;
   const frequency = document.getElementById('fFrequency').value;
   const dueDate = document.getElementById('fDueDate').value;
+  const remindDaysBefore = parseInt(document.getElementById('fRemind').value, 10);
+
+  if(category === '__new__'){
+    alert('Please finish adding your new category first, or pick an existing one.');
+    return;
+  }
 
   if(!name || isNaN(amount) || amount < 0 || !dueDate){
     alert('Please fill in a name, a valid amount, and a due date.');
@@ -595,12 +741,12 @@ document.getElementById('saveEntry').addEventListener('click', async () => {
   if(editingId){
     const idx = payments.findIndex(p => p.id === editingId);
     if(idx !== -1){
-      payments[idx] = {...payments[idx], name, amount, category, frequency, dueDate};
+      payments[idx] = {...payments[idx], name, amount, category, frequency, dueDate, remindDaysBefore};
     }
   } else {
     payments.push({
       id: 'p_' + Date.now() + '_' + Math.random().toString(36).slice(2,7),
-      name, amount, category, frequency, dueDate
+      name, amount, category, frequency, dueDate, remindDaysBefore
     });
   }
 
@@ -647,6 +793,7 @@ document.getElementById('resetAll').addEventListener('click', async () => {
 
 (async function init(){
   await loadPayments();
+  await loadCategories();
   render();
   registerServiceWorker();
   checkAndNotify();
@@ -699,10 +846,11 @@ async function checkAndNotify(force){
   for(const p of payments){
     const due = parseDateOnly(p.dueDate);
     const diff = daysUntil(due);
-    if(diff <= 1){
+    const threshold = (p.remindDaysBefore === undefined || p.remindDaysBefore === null) ? 1 : p.remindDaysBefore;
+    if(diff <= threshold){
       const key = p.id;
       if(force || log[key] !== p.dueDate){
-        let statusText = diff < 0 ? 'is overdue' : diff === 0 ? 'is due today' : 'is due tomorrow';
+        let statusText = diff < 0 ? 'is overdue' : diff === 0 ? 'is due today' : `is due in ${diff} day${diff === 1 ? '' : 's'}`;
         new Notification('Payment ' + statusText, {
           body: `${p.name} — ${currency(p.amount)}`,
           icon: './icon-192.png'
@@ -740,6 +888,7 @@ function buildIcs(){
 
   payments.forEach(p => {
     const due = parseDateOnly(p.dueDate);
+    const remindDays = (p.remindDaysBefore === undefined || p.remindDaysBefore === null) ? 1 : p.remindDaysBefore;
     lines.push('BEGIN:VEVENT');
     lines.push('UID:' + p.id + '@theledger.local');
     lines.push('DTSTAMP:' + stamp);
@@ -752,7 +901,7 @@ function buildIcs(){
     lines.push('BEGIN:VALARM');
     lines.push('ACTION:DISPLAY');
     lines.push('DESCRIPTION:Reminder');
-    lines.push('TRIGGER:-P1D');
+    lines.push('TRIGGER:' + (remindDays === 0 ? 'PT0S' : '-P' + remindDays + 'D'));
     lines.push('END:VALARM');
     lines.push('END:VEVENT');
   });
