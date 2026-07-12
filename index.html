@@ -318,6 +318,10 @@
   .foot-reset{
     text-align:center;
     margin-top:30px;
+    display:flex;
+    justify-content:center;
+    gap:18px;
+    flex-wrap:wrap;
   }
   .foot-reset button{
     background:none;
@@ -381,6 +385,9 @@
   </div>
 
   <div class="foot-reset">
+    <button id="backupData">Download backup</button>
+    <button id="restoreTrigger">Restore from backup</button>
+    <input type="file" id="restoreFile" accept="application/json" style="display:none;">
     <button id="resetAll">Clear all data</button>
   </div>
 </div>
@@ -789,6 +796,59 @@ document.getElementById('resetAll').addEventListener('click', async () => {
     await savePayments();
     render();
   }
+});
+
+document.getElementById('backupData').addEventListener('click', () => {
+  const backup = {
+    type: 'ledger-backup',
+    exportedAt: new Date().toISOString(),
+    payments,
+    categories
+  };
+  const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const dateStr = formatDateOnly(todayDateOnly());
+  a.href = url;
+  a.download = `ledger-backup-${dateStr}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+});
+
+document.getElementById('restoreTrigger').addEventListener('click', () => {
+  document.getElementById('restoreFile').click();
+});
+
+document.getElementById('restoreFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if(!file) return;
+  const reader = new FileReader();
+  reader.onload = async (evt) => {
+    try{
+      const data = JSON.parse(evt.target.result);
+      if(!data || !Array.isArray(data.payments)){
+        alert('This doesn\'t look like a valid Ledger backup file.');
+        return;
+      }
+      const doReplace = confirm(
+        `This backup contains ${data.payments.length} payment(s) from ${data.exportedAt ? new Date(data.exportedAt).toLocaleDateString() : 'an unknown date'}.\n\n` +
+        `Click OK to REPLACE your current data with this backup, or Cancel to abort.`
+      );
+      if(!doReplace) return;
+      payments = data.payments;
+      categories = Array.isArray(data.categories) && data.categories.length ? data.categories : [...DEFAULT_CATEGORIES];
+      await savePayments();
+      await saveCategories();
+      render();
+      alert('Backup restored successfully.');
+    }catch(err){
+      alert('Could not read that file. Make sure it\'s a Ledger backup (.json) file.');
+    }
+    e.target.value = '';
+  };
+  reader.readAsText(file);
 });
 
 (async function init(){
