@@ -506,8 +506,8 @@ function currency(n){
 
 async function loadPayments(){
   try{
-    const result = await window.storage.get(STORAGE_KEY, false);
-    payments = result && result.value ? JSON.parse(result.value) : [];
+    const raw = localStorage.getItem(STORAGE_KEY);
+    payments = raw ? JSON.parse(raw) : [];
   }catch(e){
     payments = [];
   }
@@ -524,7 +524,7 @@ async function loadPayments(){
 
 async function savePayments(){
   try{
-    await window.storage.set(STORAGE_KEY, JSON.stringify(payments), false);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(payments));
   }catch(e){
     console.error('Could not save ledger', e);
   }
@@ -532,8 +532,8 @@ async function savePayments(){
 
 async function loadCategories(){
   try{
-    const result = await window.storage.get(CATEGORIES_KEY, false);
-    categories = result && result.value ? JSON.parse(result.value) : [...DEFAULT_CATEGORIES];
+    const raw = localStorage.getItem(CATEGORIES_KEY);
+    categories = raw ? JSON.parse(raw) : [...DEFAULT_CATEGORIES];
   }catch(e){
     categories = [...DEFAULT_CATEGORIES];
   }
@@ -547,7 +547,7 @@ async function loadCategories(){
 
 async function saveCategories(){
   try{
-    await window.storage.set(CATEGORIES_KEY, JSON.stringify(categories), false);
+    localStorage.setItem(CATEGORIES_KEY, JSON.stringify(categories));
   }catch(e){
     console.error('Could not save categories', e);
   }
@@ -823,8 +823,8 @@ document.getElementById('enableNotif').addEventListener('click', async () => {
 
 async function getNotifiedLog(){
   try{
-    const result = await window.storage.get('notified_log', false);
-    return result && result.value ? JSON.parse(result.value) : {};
+    const raw = localStorage.getItem('notified_log');
+    return raw ? JSON.parse(raw) : {};
   }catch(e){
     return {};
   }
@@ -832,7 +832,7 @@ async function getNotifiedLog(){
 
 async function saveNotifiedLog(log){
   try{
-    await window.storage.set('notified_log', JSON.stringify(log), false);
+    localStorage.setItem('notified_log', JSON.stringify(log));
   }catch(e){
     console.error('Could not save notification log', e);
   }
